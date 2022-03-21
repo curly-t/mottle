@@ -1,0 +1,4 @@
+TODO:
+- Dodaj izračun magnetnega polja ko rho -> 0 in rho == 0
+    - Preglej kje zlepiti obe rešitvi skupaj, glede na natančnost in časovno zahtevnost izračuna!
+- Dodaj električno polje leče v izračun!
