@@ -1,4 +1,5 @@
 from calc_magnetic_field import get_Bz_tot_func, get_Brho_tot_func
+from calc_electric_field_analytic import get_Ez, get_Erho
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.integrate import solve_ivp
@@ -7,6 +8,7 @@ from matplotlib.patches import Circle
 import mpl_toolkits.mplot3d.art3d as art3d
 from mpl_toolkits.mplot3d import Axes3D
 from pathos.multiprocessing import Pool     # Veliko več objektov zna Serializirat za multiproccessing!
+from functools import cache
 
 
 # GLOBALS - TRUE CONSTANTS ONLY ----------------------------------------------------------------------------------------
@@ -16,15 +18,25 @@ mu0 = 4 * np.pi * 1e-7
 # ----------------------------------------------------------------------------------------------------------------------
 
 
-def get_gibalna_en(Bz, Brho):
-    def gibalna_en(t, y):
-        # y je vektor trenutne lokacije in hitrosti delca [rho, phi, z, rho', phi', z']
-        # Gibalna enačba vrne odvod vektorja y po času
-        # Nevem zakaj je samo v prvem delu pri rho''[t] "-" drugje pa ne! - to je čudno, ampak tako dela pri mathematici
-        return np.array([y[3], y[4], y[5],
-                         - e0/m * y[0]*y[4]*Bz(y[0], y[2]) + y[0]*np.square(y[4]),
-                         (+ e0/m * (y[3] * Bz(y[0], y[2]) - y[5] * Brho(y[0], y[2])) - 2*y[3]*y[4]) / y[0],
-                         + e0/m * y[4] * y[0] * Brho(y[0], y[2])])
+def get_gibalna_en(Bz, Brho, Ez=None, Erho=None):
+    if Ez is None or Erho is None:
+        def gibalna_en(t, y):
+            # y je vektor trenutne lokacije in hitrosti delca [rho, phi, z, rho', phi', z']
+            # Gibalna enačba vrne odvod vektorja y po času
+            # Nevem zakaj je samo v prvem delu pri rho''[t] "-" drugje pa ne! - to je čudno, ampak tako dela pri mathematici
+            # e0 je sicer +1e-19 ampak elektrone mamo tu zato je - zamenjan s plusom
+            return np.array([y[3], y[4], y[5],
+                             - e0/m * y[0]*y[4]*Bz(y[0], y[2]) + y[0]*np.square(y[4]),
+                             (e0/m * (y[3] * Bz(y[0], y[2]) - y[5] * Brho(y[0], y[2])) - 2*y[3]*y[4]) / y[0],
+                             e0/m * y[4] * y[0] * Brho(y[0], y[2])])
+    else:
+        def gibalna_en(t, y):
+            # Dodano še za električno polje
+            return np.array([y[3], y[4], y[5],
+                             - e0/m * (y[0]*y[4]*Bz(y[0], y[2]) + Erho(y[0], y[2])) + y[0]*np.square(y[4]),
+                             (e0/m * (y[3] * Bz(y[0], y[2]) - y[5] * Brho(y[0], y[2])) - 2*y[3]*y[4]) / y[0],
+                             e0/m * (y[4] * y[0] * Brho(y[0], y[2]) - Ez(y[0], y[2]))])
+
     return gibalna_en
 
 
@@ -58,6 +70,7 @@ def get_stopping_conditions(Zf, Rt, Rs, Zb, Tf):
     return stopping_conds, human_readable_end_modes
 
 
+@cache
 def data_for_cylinder_along_z(center_x, center_y, radius, start_Z, height_z):
     z = np.linspace(start_Z, height_z, 50)
     theta = np.linspace(0, 2 * np.pi, 50)
@@ -86,7 +99,7 @@ def get_single_y0_simulation_function(gibalna_en, stopping_conds, Tf=1e-5):
     return sim_single_y0
 
 
-def run_sim(y0s, Bz, Brho, stopping_conds, Tf, draw_trajectories=False, Rs=None, num_processes=4):
+def run_sim(y0s, gibalna_en, stopping_conds, Tf, draw_trajectories=False, Rs=None, num_processes=4):
     """Vhod je array pravilnih y0 vektorjev, izhod je array časov preleta za te y0.
     Not lahko damo tudi en sam začetni pogoj."""
     start = perf_counter()
@@ -95,7 +108,6 @@ def run_sim(y0s, Bz, Brho, stopping_conds, Tf, draw_trajectories=False, Rs=None,
     final_times = []
     ending_mode = []
     success = []
-    gibalna_en = get_gibalna_en(Bz, Brho)
     sim_single_y0 = get_single_y0_simulation_function(gibalna_en, stopping_conds, Tf)
 
     if draw_trajectories:
@@ -111,6 +123,7 @@ def run_sim(y0s, Bz, Brho, stopping_conds, Tf, draw_trajectories=False, Rs=None,
                 print(f"Success at i:{i}.  {i / (len(y0s) - 1)} done.  ETA: {((perf_counter() - start) / (max(i, 1) / (len(y0s) - 1)) - (perf_counter() - start))/60:.2f}min")
                 success.append(i)
                 final_times.append(res.t_events[0][0])
+
     else:   # Else - run parallel processes
         with Pool(num_processes) as p:
             results = p.map(sim_single_y0, y0s)    # Trenutno žal ne podpira napodovanja kulko še traja!
@@ -219,6 +232,12 @@ if __name__ == "__main__":
     Rs = 0.045/2          # Diameter of the sensor -> Estimate
     Zb = -0.1
     Tf = 1e-5           # Končni čas simulacije
+    # DIMENZIJE ZASUTAVLJALNE LEČE
+    Rl = 0.025/2        # Polmer zaustavljalne leče elektrostatske [m]
+    hl = 0.006          # Polovica debeline zaustavljalne elektrostatske leče [m]
+    U0 = 1              # Napetost na zaustavljalni leči
+    dl = 0.079          # Oddaljenost središča leče od vzorca [m]
+    # PREDPOSTAVKA da kot leča delujeta ta oddaljena dva cilindra
     # ------------------------------------------------------------------------------------------------------------------
 
     # Trenutno nastavljene natančnosti rtol=1e-7 in atol=1e-11  kar nam da:
@@ -232,19 +251,20 @@ if __name__ == "__main__":
     #
     # Rezultirajoč čas izračuna na trajektorijo je cca 2s.
 
-    run_name = str(input("Name this simulation run: "))
-    # y0s = get_y0s_omni(0.0001, 0.0, 0.001, v0, num=10)
-    y0s = get_y0s_xy_plane(0.0001, 0.0001, v0, num=100)
-    # y0s = get_y0s_sphere_skeleton(0.0001, 0.0001, 0.0001, v0, num=1000)
-    visualize_y0s(y0s, t_prop=1e-7)
-    Bz_tot = get_Bz_tot_func(d, a, Bmax, L, RT, BT)
-    Brho_tot = get_Brho_tot_func(d, a, Bmax, L, RT, BT)
-    stopping_conds, hr_endmodes = get_stopping_conditions(Zf, Rt, Rs, Zb, Tf)
-    times, successes, end_mode = run_sim(y0s, Bz_tot, Brho_tot, stopping_conds, Tf)
-    np.savez(f"sim_results/{run_name}.npz", y0s=y0s, times=times, successes=successes, end_mode=end_mode)
-
-    data = np.load(f"sim_results/{run_name}.npz")
-    print(data["times"], data["successes"],  hr_endmodes(data["end_mode"]))
+    # # MAGNETIC FIELD ONLY
+    # run_name = str(input("Name this simulation run: "))
+    # # y0s = get_y0s_omni(0.0001, 0.0, 0.001, v0, num=10)
+    # y0s = get_y0s_xy_plane(0.0001, 0.0001, v0, num=5)
+    # # y0s = get_y0s_sphere_skeleton(0.0001, 0.0001, 0.0001, v0, num=1000)
+    # visualize_y0s(y0s, t_prop=1e-7)
+    # Bz_tot = get_Bz_tot_func(d, a, Bmax, L, RT, BT)
+    # Brho_tot = get_Brho_tot_func(d, a, Bmax, L, RT, BT)
+    # stopping_conds, hr_endmodes = get_stopping_conditions(Zf, Rt, Rs, Zb, Tf)
+    # times, successes, end_mode = run_sim(y0s, Bz_tot, Brho_tot, stopping_conds, Tf, draw_trajectories=True, Rs=Rs)
+    # # np.savez(f"sim_results/{run_name}.npz", y0s=y0s, times=times, successes=successes, end_mode=end_mode)
+    # #
+    # # data = np.load(f"sim_results/{run_name}.npz")
+    # # print(data["times"], data["successes"],  hr_endmodes(data["end_mode"]))
 
 
     # names = ["pregled_po_kotu_z_0_0001_1eV.npz", "pregled_po_kotu_z_0_0005_1eV.npz", "pregled_po_kotu_z_0_001_1eV.npz", "pregled_po_kotu_z_0_01_1eV.npz"]
@@ -263,4 +283,22 @@ if __name__ == "__main__":
     #     axes[-1].hist(times, bins="auto", label=name[18:-8].replace("_", ","), alpha=(1-i/6))
     # plt.legend()
     # plt.show()
+
+    # ELECTRIF FILED ALSO
+    # run_name = str(input("Name this simulation run: "))
+    # y0s = get_y0s_omni(0.0001, 0.0, 0.001, v0, num=10)
+    y0s = get_y0s_xy_plane(0.0001, 0.0001, v0, num=5)
+    # y0s = get_y0s_sphere_skeleton(0.0001, 0.0001, 0.0001, v0, num=1000)
+    visualize_y0s(y0s, t_prop=1e-7)
+    Bz_tot = get_Bz_tot_func(d, a, Bmax, L, RT, BT)
+    Brho_tot = get_Brho_tot_func(d, a, Bmax, L, RT, BT)
+    Ez = get_Ez(Rl, hl, U0, dl=dl)
+    Erho = get_Erho(Rl, hl, U0, dl=dl)
+    gibalna_en = get_gibalna_en(Bz_tot, Brho_tot, Ez, Erho)
+    stopping_conds, hr_endmodes = get_stopping_conditions(Zf, Rt, Rs, Zb, Tf)
+    times, successes, end_mode = run_sim(y0s, gibalna_en, stopping_conds, Tf, draw_trajectories=True, Rs=Rs)
+    # np.savez(f"sim_results/{run_name}.npz", y0s=y0s, times=times, successes=successes, end_mode=end_mode)
+    #
+    # data = np.load(f"sim_results/{run_name}.npz")
+    # print(data["times"], data["successes"],  hr_endmodes(data["end_mode"]))
 
