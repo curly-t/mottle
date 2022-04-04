@@ -4,6 +4,7 @@ from scipy.special import factorial
 from fdm import central_fdm
 import matplotlib.pyplot as plt
 from functools import cache
+from scipy.interpolate import RectBivariateSpline
 
 
 @cache
@@ -13,10 +14,10 @@ def get_E_on_axis_func(Rr):
         zr = np.abs(zr)
 
         # Če je zr PREVELIK metoda ne skonvergira, zato priležemo gor kr en eksponent!
-        if zr > 20:
-            Ear_at_border = E_on_axis(20)
+        if zr > 15:
+            Ear_at_border = E_on_axis(15)
             # Opažena odvisnost e**(2zr)
-            return Ear_at_border * 400/(zr**2)
+            return Ear_at_border * 255/(zr**2)
 
         # DOBI Ur in Vr
         @cache
@@ -83,14 +84,14 @@ def get_Ez(R, h, U0, expansion_order=3, dl=0):
     def Ez(rho, z):
         z = np.abs(z-dl)
         # Če je zr PREVELIK metoda ne skonvergira, zato ga tam kar odrežemo.
-        if z/h > 20:
+        if z/h > 15:
             return 0.
 
         coefs = axisymetric_coefs(expansion_order)
         E_val = get_E_on_axis_func(R/h)(z/h)
         for k in range(1, expansion_order):
-            E_val += coefs[k] * rho**(2*k) * central_fdm(2*k + 2, deriv=2*k)(get_E_on_axis_func(R/h), z/h)
-        return E_val * U0
+            E_val += coefs[k] * (rho/h)**(2*k) * central_fdm(2*k + 2, deriv=2*k)(get_E_on_axis_func(R/h), z/h)
+        return - E_val * U0 / h     # Ker smo v izpeljavi dali +grad(U) namesto -grad(U)
     return Ez
 
 
@@ -99,15 +100,85 @@ def get_Erho(R, h, U0, expansion_order=3, dl=0):
     def Erho(rho, z):
         z = np.abs(z-dl)
         # Če je zr PREVELIK metoda ne skonvergira, zato ga tam kar odrežemo.
-        if z/h > 20:
+        if z/h > 15:
             return 0.
 
         coefs = axisymetric_coefs(expansion_order)
         E_val = 0.
         for k in range(1, expansion_order):
-            E_val += coefs[k] * rho**(2*k - 1) * 2 * k * central_fdm(2*k + 1, deriv=2*k - 1)(get_E_on_axis_func(R/h), z/h)
-        return E_val * U0
+            E_val += coefs[k] * (rho/h)**(2*k - 1) * 2 * k * central_fdm(2*k + 1, deriv=2*k - 1)(get_E_on_axis_func(R/h), z/h)
+        return - E_val * U0 / h       # Ker smo v izpeljavi dali +grad(U) namesto -grad(U)
     return Erho
+
+
+def load_simion_data(filepath, skiprows, max_rows):
+    # Kako dobimo to številko za max_rows? :
+    # Dolžina fila (grep -c '^' chamber_20pix_per_mm.patxt) - 2 (spusti zadnji dve) - 3 (sprednji trije)
+    # V filu je zapis: x, y, z, is_electrode, potential
+    # Funkcija vrne [[x, y, z, is_electrode, potential]_1, []_2, ...]
+    # Simion ma x tam kjer mamo mi z in naša xy ravnina je njegova yz ravnina
+    return np.loadtxt(filepath, skiprows=skiprows, max_rows=max_rows)
+
+
+def reposition_simion_data(data, z_offset, points_per_mm):
+    xsize_pre = int(np.max(data[:, 0]) + 1)
+    mirrored = np.array(sorted(data[xsize_pre:], key=lambda el: (-el[1], el[0])))   # Pri rho=0 ne smeš dat zraven 2x
+    mirrored[:, 1] *= -1
+    positioned_data = np.concatenate((mirrored, data))
+    xsize, ysize = int(np.max(positioned_data[:, 0]) + 1), int(np.max(positioned_data[:, 1]) * 2 + 1)
+
+    # positioned_data = np.copy(data)
+    positioned_data[:, 0] = positioned_data[:, 0] * 0.001 / points_per_mm + z_offset
+    positioned_data[:, 1] = positioned_data[:, 1] * 0.001 / points_per_mm
+    return positioned_data, xsize, ysize
+
+
+def get_field_funcs_simion(data, U0, xsize, ysize):
+    # U0 je v voltih
+    spl_rho, spl_z = data[::xsize, 1], data[:xsize, 0]
+    spline_rep = RectBivariateSpline(spl_rho, spl_z, data[:, 4].reshape(ysize, xsize))     # Ker hočemo (rho, z) koordinate
+    Erho = -spline_rep(spl_rho, spl_z, dx=1)        # E = -grad(U)
+    Ez = -spline_rep(spl_rho, spl_z, dy=1)          # E = -grad(U)
+
+    Erho_splrep = RectBivariateSpline(spl_rho, spl_z, Erho * U0)
+    Ez_splrep = RectBivariateSpline(spl_rho, spl_z, Ez * U0)
+
+    fig, axes = plt.subplots(1, 3)
+
+    axes[0].plot(Ez_splrep(0., spl_z)[0])
+
+    axes[1].imshow(Ez_splrep(spl_rho, spl_z))
+
+    axes[2].imshow(Ez)
+    plt.show()
+
+    def Erho_simion(rho, z):
+        z = np.abs(z)
+        rho = np.abs(rho)
+        if (rho > spl_rho[-1]) or (z > spl_z[-1]):
+            return 0.
+        return Erho_splrep(rho, z)[0][0]
+
+    def Ez_simion(rho, z):
+        z = np.abs(z)
+        rho = np.abs(rho)
+        if (rho > spl_rho[-1]) or (z > spl_z[-1]):
+            return 0.
+        return Ez_splrep(rho, z)[0][0]
+
+    return Erho_simion, Ez_simion
+
+
+def get_simion_field_funcs(filepath="simion/chamber_20pix_per_mm.patxt", skiprows=3, max_rows=7020000,
+                      z_offset=0.010, points_per_mm=20, U0=1):
+    # Kako dobimo številko za max_rows? :
+    # Dolžina fila (grep -c '^' chamber_20pix_per_mm.patxt) - 2 (spusti zadnji dve) - 3 (sprednji trije)
+    # V filu je zapis: x, y, z, is_electrode, potential
+    # Funkcija vrne [[x, y, z, is_electrode, potential]_1, []_2, ...]
+    # Simion ma x tam kjer mamo mi z in naša xy ravnina je njegova yz ravnina
+    data = load_simion_data(filepath, skiprows, max_rows)
+    pos_data, xsize, ysize = reposition_simion_data(data, z_offset, points_per_mm)
+    return get_field_funcs_simion(pos_data, U0, xsize, ysize)
 
 
 if __name__ == "__main__":
@@ -119,25 +190,38 @@ if __name__ == "__main__":
     R = 0.025/2
     h = 0.006
 
-    # Ez = get_Ez(R, h, 1)
-    # Erho = get_Erho(R, h, 1)
+    # Ez = get_Ez(R, h/2 + 0.001, 1/2)        # V Algoritmu je 2*U0 in 2*h med ploščama zato h/2 in U0/2
+    # Erho = get_Erho(R, h/2, 1/2)
+    #
+    # Erho_sim, Ez_sim = get_simion_field_funcs()
     #
     # # TEST 1
-    # zs = np.linspace(-5*R, 5*R, num=200)  # Do sem še gre - nato razširi z eksponentno? al pa kr trdo odrežeč?
+    # zs = np.linspace(-5*R, 5*R, num=200)  # Do sem še gre - nato razširi z eksponentno? al pa kr trdo odrežeš?
+    # # zs = np.linspace(-100*R, 100*R, num=50000)  # Do sem še gre - nato razširi z eksponentno? al pa kr trdo odrežeš?
+    # print("intep!")
     # polja = np.zeros_like(zs)
+    # polja_sim = np.zeros_like(zs)
     # for i, z in enumerate(zs):
     #     polja[i] = Ez(0., z)
-    # plt.plot(zs, polja)
+    #     polja_sim[i] = Ez_sim(0., z + 0.079)    # Da prikaže prav mormo tole računat zamaknjeno za 79 mm
+    # plt.plot(zs, polja, label="Near axis priblizek")
+    # plt.plot(zs, polja_sim, label="Simion")
+    # plt.legend()
     # plt.show()
-    #
+
+
     # # TEST 2
-    # rhos = np.linspace(-R/2, R/2, num=100)
+    # rhos = np.linspace(-R*2, 2*R, num=100)
     # polja = np.zeros_like(rhos)
+    # polja_sim = np.zeros_like(rhos)
     # for i, rho in enumerate(rhos):
-    #     polja[i] = Erho(rho, h/2)
-    # plt.plot(rhos, polja)
+    #     polja[i] = Erho(rho, h/3)
+    #     polja_sim[i] = Erho_sim(rho, h/3 + 0.079)
+    # plt.plot(rhos, polja, label="Near axis priblizek")
+    # plt.plot(rhos, polja_sim, label="Simion")
+    # plt.legend()
     # plt.show()
-    #
+
     # # Test 3
     # rhos = np.linspace(-R, R, num=11)
     # zs = np.linspace(-5*R, 5*R, num=500)
@@ -149,7 +233,7 @@ if __name__ == "__main__":
     # plt.xlabel("z")
     # plt.title("Zeleno -> Modra ... rho = -R -> R")
     # plt.show()
-    #
+
     # # Test 4
     # zs = np.linspace(-5*R, 5*R, num=200)
     # rhos = np.linspace(0, R, num=10)
@@ -161,4 +245,3 @@ if __name__ == "__main__":
     # plt.xlabel("zs")
     # plt.title("Zelena -> Modra ... Rho = -R -> R")
     # plt.show()
-
