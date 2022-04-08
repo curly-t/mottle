@@ -8,7 +8,7 @@ from matplotlib.patches import Circle
 import mpl_toolkits.mplot3d.art3d as art3d
 from mpl_toolkits.mplot3d import Axes3D
 from pathos.multiprocessing import Pool     # Veliko več objektov zna Serializirat za multiproccessing!
-from functools import cache
+from field_interpolator import get_interpolated_func
 
 
 # GLOBALS - TRUE CONSTANTS ONLY ----------------------------------------------------------------------------------------
@@ -70,7 +70,6 @@ def get_stopping_conditions(Zf, Rt, Rs, Zb, Tf):
     return stopping_conds, human_readable_end_modes
 
 
-@cache
 def data_for_cylinder_along_z(center_x, center_y, radius, start_Z, height_z):
     z = np.linspace(start_Z, height_z, 50)
     theta = np.linspace(0, 2 * np.pi, 50)
@@ -251,20 +250,25 @@ if __name__ == "__main__":
     #
     # Rezultirajoč čas izračuna na trajektorijo je cca 2s.
 
-    # # MAGNETIC FIELD ONLY
-    # run_name = str(input("Name this simulation run: "))
-    # # y0s = get_y0s_omni(0.0001, 0.0, 0.001, v0, num=10)
-    # y0s = get_y0s_xy_plane(0.0001, 0.0001, v0, num=5)
-    # # y0s = get_y0s_sphere_skeleton(0.0001, 0.0001, 0.0001, v0, num=1000)
-    # visualize_y0s(y0s, t_prop=1e-7)
-    # Bz_tot = get_Bz_tot_func(d, a, Bmax, L, RT, BT)
-    # Brho_tot = get_Brho_tot_func(d, a, Bmax, L, RT, BT)
-    # stopping_conds, hr_endmodes = get_stopping_conditions(Zf, Rt, Rs, Zb, Tf)
-    # times, successes, end_mode = run_sim(y0s, Bz_tot, Brho_tot, stopping_conds, Tf, draw_trajectories=True, Rs=Rs)
-    # # np.savez(f"sim_results/{run_name}.npz", y0s=y0s, times=times, successes=successes, end_mode=end_mode)
-    # #
-    # # data = np.load(f"sim_results/{run_name}.npz")
-    # # print(data["times"], data["successes"],  hr_endmodes(data["end_mode"]))
+    # MAGNETIC FIELD ONLY
+    run_name = str(input("Name this simulation run: "))
+    # y0s = get_y0s_omni(0.0001, 0.0, 0.001, v0, num=10)
+    y0s = get_y0s_xy_plane(0.0001, 0.0001, v0, num=5)
+    # y0s = get_y0s_sphere_skeleton(0.0001, 0.0001, 0.0001, v0, num=1000)
+    visualize_y0s(y0s, t_prop=1e-7)
+    Bz_tot = get_Bz_tot_func(d, a, Bmax, L, RT, BT)
+    Brho_tot = get_Brho_tot_func(d, a, Bmax, L, RT, BT)
+    # Interpolation
+    external_params = {"d": d, "a": a, "Bmax": Bmax, "L": L, "RT": RT, "BT": BT}
+    interp_params = {"bbox": ((0.0001, Zb), (Rt, Zf)), "initial_depth": 4, "num_of_far_bound_points": 2000, "final_ref_tol":1e-4, "num_test_points":20000}
+    Bzi = get_interpolated_func(Bz_tot, interp_params, external_params)
+    Brhoi = get_interpolated_func(Brho_tot, interp_params, external_params)
+    stopping_conds, hr_endmodes = get_stopping_conditions(Zf, Rt, Rs, Zb, Tf)
+    times, successes, end_mode = run_sim(y0s, Bzi, Brhoi, stopping_conds, Tf, draw_trajectories=True, Rs=Rs)
+    # np.savez(f"sim_results/{run_name}.npz", y0s=y0s, times=times, successes=successes, end_mode=end_mode)
+    #
+    # data = np.load(f"sim_results/{run_name}.npz")
+    # print(data["times"], data["successes"],  hr_endmodes(data["end_mode"]))
 
 
     # names = ["pregled_po_kotu_z_0_0001_1eV.npz", "pregled_po_kotu_z_0_0005_1eV.npz", "pregled_po_kotu_z_0_001_1eV.npz", "pregled_po_kotu_z_0_01_1eV.npz"]
@@ -283,6 +287,7 @@ if __name__ == "__main__":
     #     axes[-1].hist(times, bins="auto", label=name[18:-8].replace("_", ","), alpha=(1-i/6))
     # plt.legend()
     # plt.show()
+
 
     # ELECTRIF FILED ALSO
     # run_name = str(input("Name this simulation run: "))

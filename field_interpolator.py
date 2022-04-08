@@ -40,6 +40,7 @@ def calc_far_bound_points(field_func, bbox, num_bound_points):
     """ This function is needed because the tree includes the low bound, but excludes the high bound,
     making the points near the high bound possibly undefined! """
 
+    print(bbox, num_bound_points)
     # Ena stranica končnih točk
     rhos1 = np.ones(num_bound_points//2 - 1) * bbox[1][0]
     zs1 = np.linspace(bbox[0][1], bbox[1][1], num=num_bound_points//2 - 1, endpoint=False)
@@ -135,58 +136,68 @@ def refine_tree(tree, field_func, bbox, far_bound_points, ref_tol=0.1, ref_exten
     return interp_func
 
 
-def interpolate_func(func, bbox, initial_depth, num_of_far_bound_points=2000, **kwargs):
+def interpolate_func(func, bbox=None, initial_depth=None, num_of_far_bound_points=2000, **kwargs):
     far_bound_points = calc_far_bound_points(func, bbox, num_of_far_bound_points)
     tree = make_initial_tree(func, bbox, initial_depth)
     return refine_tree(tree, func, bbox, far_bound_points, **kwargs)
 
 
-def construct_save_name(func_num, interp_params):
+def construct_save_name(func_num, interp_params, external_params):
     name_str = func_num
-    interp_param_str = "_".join([f"{str(key).replace('_', ':')}={str(type(val))[8]}{str(val).replace('.', ':')}" for (key, val) in interp_params.items()])
-    return "__".join([name_str, interp_param_str]) + ".interp_func"
+    interp_param_str = "_".join(
+        [f"{str(key).replace('_', ':')}={str(type(val))[8]}{str(val).replace('.', ':')}" for (key, val) in
+         interp_params.items()])
+    extrn_param_str = "_".join(
+        [f"{str(key).replace('_', ':')}={str(type(val))[8]}{str(val).replace('.', ':')}" for (key, val) in
+         external_params.items()])
+    return "__".join([name_str, interp_param_str, extrn_param_str]) + ".interp_func"
 
 
 def parse_save_name(filename):
     stripped = filename[:-12]
-    name, interp_param_str = tuple(stripped.split("__"))
-
+    name, interp_param_str, extern_param_str = tuple(stripped.split("__"))
     interp_param_strings = interp_param_str.split("_")
+    extern_param_strings = extern_param_str.split("_")
 
-    params_dict = {}
-    for param_str in interp_param_strings:
-        key, val = tuple(param_str.split("="))
-        key = key.replace(":", "_")
+    def parse_param_strings(param_strings):
+        if param_strings == [""]:
+            return {}
 
-        val_type = val[0]
-        if val_type == "i":
-            val = int(val[1:])
-        elif val_type == "f":
-            val = float(val[1:].replace(":", "."))
-        elif val_type == "t":
-            # Tuple
-            val = literal_eval(val[1:].replace(":", "."))
+        params_dict = {}
+        for param_str in param_strings:
+            key, val = tuple(param_str.split("="))
+            key = key.replace(":", "_")
 
-        params_dict.update({key: val})
+            val_type = val[0]
+            if val_type == "i":
+                val = int(val[1:])
+            elif val_type == "f":
+                val = float(val[1:].replace(":", "."))
+            elif val_type == "t":
+                # Tuple
+                val = literal_eval(val[1:].replace(":", "."))
 
-    return {"filename": filename, "name": name, "interp_params": params_dict}
+            params_dict.update({key: val})
+        return params_dict
+
+    return {"filename": filename, "name": name,
+            "interp_params": parse_param_strings(interp_param_strings),
+            "external_params": parse_param_strings(extern_param_strings)}
 
 
 def parse_all_saved_interps_names():
-    filenames = list(glob("*.interp_func"))
+    filenames = [path.split(fname)[1] for fname in list(glob(path.join("interpolated_fields", "*.interp_func")))]
     properties = []
     for filename in filenames:
         properties.append(parse_save_name(filename))
     return properties
 
 
-def search_saved_interps_for_match(func, interp_params, all_saved_interpolators):
+def search_saved_interps_for_match(func, interp_params, external_params, all_saved_interpolators):
     for saved_interpolator in all_saved_interpolators:
         if func.__name__ == saved_interpolator["name"]:
-            if interp_params == saved_interpolator["interp_params"]:
+            if interp_params == saved_interpolator["interp_params"] and external_params == saved_interpolator["external_params"]:
                 return saved_interpolator["filename"]
-    # If it gets to here, then no such saved interpolator exsists, we have to make a new inteprolation
-    return None
 
 
 def load_saved_interpolator(filename):
@@ -195,23 +206,22 @@ def load_saved_interpolator(filename):
     return interpolator
 
 
-def save_interpolator(interpolator, func_name, interp_params):
-    filename = construct_save_name(func_name, interp_params)
-    print(filename)
+def save_interpolator(interpolator, func_name, interp_params, external_params):
+    filename = construct_save_name(func_name, interp_params, external_params)
     with open(path.join("interpolated_fields", filename), "wb") as f:
         print("Dumping!")
         pickle.dump(interpolator, f)
 
 
-def get_interpolated_func(func, interp_params):
+def get_interpolated_func(func, interp_params, external_params={}):
     all_saved_interpolators = parse_all_saved_interps_names()
-    interp_filename = search_saved_interps_for_match(func, interp_params, all_saved_interpolators)
+    interp_filename = search_saved_interps_for_match(func, interp_params, external_params, all_saved_interpolators)
     if interp_filename is not None:
         return load_saved_interpolator(interp_filename)
     else:
         # New one will have to be calculated
         interp_func = interpolate_func(func, **interp_params)
-        save_interpolator(interp_func, func.__name__, interp_params)
+        save_interpolator(interp_func, func.__name__, interp_params, external_params)
         return interp_func
 
 
