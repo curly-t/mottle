@@ -2,3 +2,4 @@ __pycache__/
 .idea/
 gradivo/
 simion/
+interpolated_fields/
