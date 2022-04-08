@@ -3,13 +3,11 @@ import math as m
 import scipy as sp
 from scipy.special import ellipk, ellipe, elliprf, elliprj
 import matplotlib.pyplot as plt
-from functools import cache
 
 # GLOBAL CONSTANT
 mu0 = 4 * np.pi * 1e-7
 
 
-@cache
 def ellippi(n, m):
     # Based on:
     # https://mathworld.wolfram.com/CarlsonEllipticIntegrals.html
@@ -17,18 +15,15 @@ def ellippi(n, m):
     return elliprf(0., 1. - m, 1.) + n * elliprj(0., 1. - m, 1., 1. - n) / 3.
 
 
-@cache
 def _kappa_sqd(rho, ceta, RT):
     return 4 * RT * rho / (np.square(RT + rho) + np.square(ceta))
 
 
-@cache
 def _inner_part_BTz(rho, ceta, h_sqd, RT):
     kappa_sqd = _kappa_sqd(rho, ceta, RT)
     return ceta * np.sqrt(kappa_sqd) * (ellipk(kappa_sqd) + (RT - rho)/(RT + rho) * ellippi(h_sqd, kappa_sqd))
 
 
-@cache
 def BTz(rho, z, L, RT, BT):
     # Pozor - rezultat divergira ko je z == 0 ali rho == 0
     # Problem če je rho < 0 kar je itak nefizikalno, mathematica zvozi zato ker dela analitično kulker daleč lahko
@@ -39,13 +34,11 @@ def BTz(rho, z, L, RT, BT):
            (_inner_part_BTz(rho, ceta_p, h_sqd, RT) - _inner_part_BTz(rho, ceta_m, h_sqd, RT))
 
 
-@cache
 def _inner_part_BTrho(rho, ceta, RT):
     kappa_sqd = _kappa_sqd(rho, ceta, RT)
     return (kappa_sqd - 2)/np.sqrt(kappa_sqd) * ellipk(kappa_sqd) + 2 / np.sqrt(kappa_sqd) * ellipe(kappa_sqd)
 
 
-@cache
 def BTrho(rho, z, L, RT, BT):
     # Problem če je rho < 0 kar je itak nefizikalno, mathematica zvozi zato ker dela analitično kulker daleč lahko
     ceta_p = z + L/2
@@ -53,28 +46,23 @@ def BTrho(rho, z, L, RT, BT):
     return BT / (2. * np.pi) * np.sqrt(RT / rho) * (_inner_part_BTrho(rho, ceta_p, RT) - _inner_part_BTrho(rho, ceta_m, RT))
 
 
-@cache
 def B(z, to, a):
     # Odvisnost polja zanke v osi zanke
     return mu0 * a * a * to / (2 * np.power(z*z + a*a, 3/2))
 
 
-@cache
 def _alpha_sqd(a, rho, z):
     return a*a + np.square(rho) + np.square(z) - 2*a*rho
 
 
-@cache
 def _beta_sqd(a, rho, z):
     return a*a + np.square(rho) + np.square(z) + 2*a*rho
 
 
-@cache
 def _k_sqd(alpha_sqd, beta_sqd):
     return 1 - alpha_sqd/beta_sqd
 
 
-@cache
 def Bz(rho, z, a, Bmax):
     # Komponenta polja krozne zanke po prostoru
     alpha_sqd = _alpha_sqd(a, rho, z)
@@ -84,7 +72,6 @@ def Bz(rho, z, a, Bmax):
            ((a*a - np.square(rho) - np.square(z)) * ellipe(k_sqd) + alpha_sqd * ellipk(k_sqd))
 
 
-@cache
 def Brho(rho, z, a, Bmax):
     alpha_sqd = _alpha_sqd(a, rho, z)
     beta_sqd = _beta_sqd(a, rho, z)
@@ -93,12 +80,10 @@ def Brho(rho, z, a, Bmax):
            ((a*a + np.square(rho) + np.square(z)) * ellipe(k_sqd) - alpha_sqd * ellipk(k_sqd))
 
 
-@cache
 def Bz_tot(rho, z, d, a, Bmax, L, RT, BT):
     return Bz(rho, z, a, Bmax) + BTz(rho, z - L/2 - d, L, RT, BT)
 
 
-@cache
 def Brho_tot(rho, z, d, a, Bmax, L, RT, BT):
     return Brho(rho, z, a, Bmax) + BTrho(rho, z - L/2 - d, L, RT, BT)
 

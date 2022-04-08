@@ -3,13 +3,10 @@ from scipy.optimize import root
 from scipy.special import factorial
 from fdm import central_fdm
 import matplotlib.pyplot as plt
-from functools import cache
 from scipy.interpolate import RectBivariateSpline
 
 
-@cache
 def get_E_on_axis_func(Rr):
-    @cache
     def E_on_axis(zr):
         zr = np.abs(zr)
 
@@ -71,7 +68,6 @@ def get_E_on_axis_func(Rr):
     return E_on_axis
 
 
-@cache
 def axisymetric_coefs(k_num):
     coef_fs = np.zeros(k_num)
     for k in range(k_num):
@@ -80,7 +76,6 @@ def axisymetric_coefs(k_num):
 
 
 def get_Ez(R, h, U0, expansion_order=3, dl=0):
-    @cache
     def Ez(rho, z):
         z = np.abs(z-dl)
         # Če je zr PREVELIK metoda ne skonvergira, zato ga tam kar odrežemo.
@@ -96,7 +91,6 @@ def get_Ez(R, h, U0, expansion_order=3, dl=0):
 
 
 def get_Erho(R, h, U0, expansion_order=3, dl=0):
-    @cache
     def Erho(rho, z):
         z = np.abs(z-dl)
         # Če je zr PREVELIK metoda ne skonvergira, zato ga tam kar odrežemo.
