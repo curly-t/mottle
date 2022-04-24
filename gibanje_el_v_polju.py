@@ -251,7 +251,7 @@ if __name__ == "__main__":
     # Rezultirajoč čas izračuna na trajektorijo je cca 2s.
 
     # MAGNETIC FIELD ONLY
-    run_name = str(input("Name this simulation run: "))
+    # run_name = str(input("Name this simulation run: "))
     # y0s = get_y0s_omni(0.0001, 0.0, 0.001, v0, num=10)
     y0s = get_y0s_xy_plane(0.0001, 0.0001, v0, num=5)
     # y0s = get_y0s_sphere_skeleton(0.0001, 0.0001, 0.0001, v0, num=1000)
@@ -260,7 +260,9 @@ if __name__ == "__main__":
     Brho_tot = get_Brho_tot_func(d, a, Bmax, L, RT, BT)
     # Interpolation
     external_params = {"d": d, "a": a, "Bmax": Bmax, "L": L, "RT": RT, "BT": BT}
-    interp_params = {"bbox": ((0.0001, Zb), (Rt, Zf)), "initial_depth": 4, "num_of_far_bound_points": 2000, "final_ref_tol":1e-4, "num_test_points":20000}
+    interp_params = {"bbox": ((0.0001, Zb*1.1), (Rt, Zf)), "initial_depth": 4,
+                     "num_of_far_bound_points": 2000, "final_ref_tol": 1e-4, "num_test_points": 50000,
+                     "ref_tol": 0.05, "max_ref_depth": 14}
     Bzi = get_interpolated_func(Bz_tot, interp_params, external_params)
     Brhoi = get_interpolated_func(Brho_tot, interp_params, external_params)
     stopping_conds, hr_endmodes = get_stopping_conditions(Zf, Rt, Rs, Zb, Tf)

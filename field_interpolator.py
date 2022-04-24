@@ -121,8 +121,7 @@ def refine_tree(tree, field_func, bbox, far_bound_points, ref_tol=0.1, ref_exten
         interp_func = construct_interpolation(full_coords, full_vals)
         stat_vals, deviations = test_interpolation(interp_func, field_func, bbox, num_test_points)
 
-        vis.plot(tree, grid=True, cmap="Greys")
-        plt.show()
+        vis.plot(tree, grid=True, cmap="Greys", aspect="auto", colorbar=False)
         plt.scatter(deviations[0][0], deviations[0][1], alpha=0.05 + 0.95*np.abs(deviations[1])/np.max(np.abs(deviations[1])), marker=".")
         plt.show()
 
