@@ -1,5 +1,5 @@
 from calc_magnetic_field import get_Bz_tot_func, get_Brho_tot_func
-from calc_electric_field_analytic import get_Ez, get_Erho
+from calc_electric_field_analytic import get_Ez, get_Erho, get_simion_field_funcs
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.integrate import solve_ivp
@@ -8,7 +8,7 @@ from matplotlib.patches import Circle
 import mpl_toolkits.mplot3d.art3d as art3d
 from mpl_toolkits.mplot3d import Axes3D
 from pathos.multiprocessing import Pool     # Veliko več objektov zna Serializirat za multiproccessing!
-from field_interpolator import get_interpolated_func
+# from field_interpolator import get_interpolated_func  - trenutno ne uporabljamo...
 
 
 # GLOBALS - TRUE CONSTANTS ONLY ----------------------------------------------------------------------------------------
@@ -40,7 +40,7 @@ def get_gibalna_en(Bz, Brho, Ez=None, Erho=None):
     return gibalna_en
 
 
-def get_stopping_conditions(Zf, Rt, Rs, Zb, Tf):
+def get_stopping_conditions(Zf, Rt, Rs, Zb, Tf, Rl ,Zlz, Zlk):
     def padel_na_senzor(t, y):
         return (y[2] - (Zf - 1e-6)) + (1 + np.sign(y[0] - Rs))
 
@@ -49,6 +49,9 @@ def get_stopping_conditions(Zf, Rt, Rs, Zb, Tf):
 
     def zadel_ob_rob_cevi(t, y):
         return y[0] - Rt
+
+    def zadel_ob_elektrostatsko_leco(t, y):
+        return -2 * int(y[0] > Rl and Zlk < y[2] < Zlz) + 1
 
     def zbezal_nazaj(t, y):
         return y[2] - Zb
@@ -59,10 +62,16 @@ def get_stopping_conditions(Zf, Rt, Rs, Zb, Tf):
     padel_na_senzor.terminal = True
     zadel_koncno_steno.terminal = True
     zadel_ob_rob_cevi.terminal = True
+    zadel_ob_elektrostatsko_leco.terminal = True
     zbezal_nazaj.terminal = True
     potekel_cas.terminal = True
 
-    stopping_conds = [padel_na_senzor, zadel_koncno_steno, zadel_ob_rob_cevi, zbezal_nazaj, potekel_cas]
+    stopping_conds = [padel_na_senzor,
+                      zadel_koncno_steno,
+                      zadel_ob_rob_cevi,
+                      zadel_ob_elektrostatsko_leco,
+                      zbezal_nazaj,
+                      potekel_cas]
 
     def human_readable_end_modes(end_modes):
         return [stopping_conds[mode].__name__ for mode in end_modes]
@@ -89,6 +98,10 @@ def draw_sim(res, Rs):
     p_sens = Circle((0, 0), Rs, alpha=0.3)
     ax.add_patch(p_sens)
     art3d.pathpatch_2d_to_3d(p_sens, z=Zf, zdir="z")
+    plt.show()
+
+    velocity = np.square(np.sqrt(np.square(res.y[3]) + np.square(res.y[0]*res.y[4]) + np.square(res.y[5])) / 3e8) * 510999 / 2
+    plt.plot(res.y[2], velocity)
     plt.show()
 
 
@@ -223,19 +236,22 @@ if __name__ == "__main__":
     # MEDSEBOJNA POZICIJA ZANKE IN TULJAVE
     d = 0.09560  # Razadlja med zanko in začetkom tuljave v m
     # ELEKTRONSKI PARAMETRI
-    EE = 35  # Hitrost elektorna z energijo EE eV v m/s
-    v0 = np.sqrt(2 * EE / 27.212) / 137 * 3e8
+    EE = 30  # Hitrost elektorna z energijo EE eV v m/s     ENOTE IZ EV v M/S !!!
+    # v0 = np.sqrt(2 * EE / 27.212) / 137 * 3e8     # Stara formula
+    v0 = np.sqrt(2 * EE / 510999) * 3e8                      # ... ampak se mi zdi tale bolj prava...
     # DIMENZIJE DETEKTORJA
     Zf = L + d + 0.01080   # Dolžina cele magnetne steklenice v metrih od vzorca pa do detektorja
     Rt = 0.073/2            # Diameter of the solenoid tube
     Rs = 0.045/2          # Diameter of the sensor -> Estimate
-    Zb = -0.1
+    Zb = -0.1           # Razdalja zadnje stene od začetka (negativno pomeni da je nazaj)
     Tf = 1e-5           # Končni čas simulacije
     # DIMENZIJE ZASUTAVLJALNE LEČE
     Rl = 0.025/2        # Polmer zaustavljalne leče elektrostatske [m]
     hl = 0.006          # Polovica debeline zaustavljalne elektrostatske leče [m]
-    U0 = 1              # Napetost na zaustavljalni leči
+    U0 = -20             # Napetost na zaustavljalni leči (zausatvljalna leča = U0 < 0)
     dl = 0.079          # Oddaljenost središča leče od vzorca [m]
+    Zlz = 0.066         # Začetek lečnih elementov - določuje ekslkuzijsko cono za elektrone, ker se lahko zaletijo sem
+    Zlk = 0.084         # Konec lečnih elementov - določuje ekslkuzijsko cono za elektrone, ker se lahko zaletijo sem
     # PREDPOSTAVKA da kot leča delujeta ta oddaljena dva cilindra
     # ------------------------------------------------------------------------------------------------------------------
 
@@ -250,33 +266,22 @@ if __name__ == "__main__":
     #
     # Rezultirajoč čas izračuna na trajektorijo je cca 2s.
 
-    # MAGNETIC FIELD ONLY
-    # run_name = str(input("Name this simulation run: "))
-    y0s = get_y0s_omni(0.0001, 0.0, 0.001, v0, num=100)
-    # y0s = get_y0s_xy_plane(0.0001, 0.0001, v0, num=5)
-    # y0s = get_y0s_sphere_skeleton(0.0001, 0.0001, 0.0001, v0, num=1000)
-    visualize_y0s(y0s, t_prop=1e-7)
-    Bz_tot = get_Bz_tot_func(d, a, Bmax, L, RT, BT)
-    Brho_tot = get_Brho_tot_func(d, a, Bmax, L, RT, BT)
-    # Interpolation
-    external_params = {"d": d, "a": a, "Bmax": Bmax, "L": L, "RT": RT, "BT": BT}
-    interp_params = {"bbox": ((0.0001, Zb*1.1), (Rt, Zf)), "initial_depth": 4,
-                     "num_of_far_bound_points": 2000, "final_ref_tol": 1e-4, "num_test_points": 50000,
-                     "ref_tol": 0.05, "max_ref_depth": 13}
-    Bzi = get_interpolated_func(Bz_tot, interp_params, external_params)
-    Brhoi = get_interpolated_func(Brho_tot, interp_params, external_params)
-    stopping_conds, hr_endmodes = get_stopping_conditions(Zf, Rt, Rs, Zb, Tf)
-    gibalna_en = get_gibalna_en(Bzi, Brhoi)
+    # # MAGNETIC FIELD ONLY
+    # # run_name = str(input("Name this simulation run: "))
+    # y0s = get_y0s_omni(0.0001, 0.0, 0.001, v0, num=100)
+    # # y0s = get_y0s_xy_plane(0.0001, 0.0001, v0, num=5)
+    # # y0s = get_y0s_sphere_skeleton(0.0001, 0.0001, 0.0001, v0, num=1000)
+    # visualize_y0s(y0s, t_prop=1e-7)
+    # Bz_tot = get_Bz_tot_func(d, a, Bmax, L, RT, BT)
+    # Brho_tot = get_Brho_tot_func(d, a, Bmax, L, RT, BT)
+    # stopping_conds, hr_endmodes = get_stopping_conditions(Zf, Rt, Rs, Zb, Tf)
     # gibalna_en = get_gibalna_en(Bz_tot, Brho_tot)
-    from time import perf_counter
-    print("Running sim!")
-    t0 = perf_counter()
-    times, successes, end_mode = run_sim(y0s, gibalna_en, stopping_conds, Tf, draw_trajectories=False, Rs=Rs, num_processes=12)
-    print("Final time =", perf_counter() - t0)
-    # np.savez(f"sim_results/{run_name}.npz", y0s=y0s, times=times, successes=successes, end_mode=end_mode)
-    #
-    # data = np.load(f"sim_results/{run_name}.npz")
-    # print(data["times"], data["successes"],  hr_endmodes(data["end_mode"]))
+    # print("Running sim!")
+    # times, successes, end_mode = run_sim(y0s, gibalna_en, stopping_conds, Tf, draw_trajectories=False, Rs=Rs, num_processes=4)
+    # # np.savez(f"sim_results/{run_name}.npz", y0s=y0s, times=times, successes=successes, end_mode=end_mode)
+    # #
+    # # data = np.load(f"sim_results/{run_name}.npz")
+    # # print(data["times"], data["successes"],  hr_endmodes(data["end_mode"]))
 
 
     # names = ["pregled_po_kotu_z_0_0001_1eV.npz", "pregled_po_kotu_z_0_0005_1eV.npz", "pregled_po_kotu_z_0_001_1eV.npz", "pregled_po_kotu_z_0_01_1eV.npz"]
@@ -297,21 +302,34 @@ if __name__ == "__main__":
     # plt.show()
 
 
-    # # ELECTRIF FILED ALSO
-    # # run_name = str(input("Name this simulation run: "))
-    # # y0s = get_y0s_omni(0.0001, 0.0, 0.001, v0, num=10)
+    # MAGNETIC FIELD INTERPOLATION
+    # Interpolation
+    # external_params = {"d": d, "a": a, "Bmax": Bmax, "L": L, "RT": RT, "BT": BT}
+    # interp_params = {"bbox": ((0.0001, Zb*1.1), (Rt, Zf)), "initial_depth": 4,
+    #                  "num_of_far_bound_points": 2000, "final_ref_tol": 1e-4, "num_test_points": 50000,
+    #                  "ref_tol": 0.05, "max_ref_depth": 13}
+    # Bzi = get_interpolated_func(Bz_tot, interp_params, external_params)
+    # Brhoi = get_interpolated_func(Brho_tot, interp_params, external_params)
+    # gibalna_en = get_gibalna_en(Bzi, Brhoi)
+    # ZA ZDEJ DELUJE TOLE POČASNEJE KOT TOČEN IZRAČUN WHICH IS HELLA WIERD, AMPAK OK - PROBAJ POPRAVIT?
+
+
+
+    # ELECTRIF FILED ALSO
+    # run_name = str(input("Name this simulation run: "))
+    # y0s = get_y0s_omni(0.00001, 0.0, 0.001, v0, num=10)
     # y0s = get_y0s_xy_plane(0.0001, 0.0001, v0, num=5)
-    # # y0s = get_y0s_sphere_skeleton(0.0001, 0.0001, 0.0001, v0, num=1000)
-    # visualize_y0s(y0s, t_prop=1e-7)
-    # Bz_tot = get_Bz_tot_func(d, a, Bmax, L, RT, BT)
-    # Brho_tot = get_Brho_tot_func(d, a, Bmax, L, RT, BT)
-    # Ez = get_Ez(Rl, hl, U0, dl=dl)
-    # Erho = get_Erho(Rl, hl, U0, dl=dl)
-    # gibalna_en = get_gibalna_en(Bz_tot, Brho_tot, Ez, Erho)
-    # stopping_conds, hr_endmodes = get_stopping_conditions(Zf, Rt, Rs, Zb, Tf)
-    # times, successes, end_mode = run_sim(y0s, gibalna_en, stopping_conds, Tf, draw_trajectories=True, Rs=Rs)
-    # # np.savez(f"sim_results/{run_name}.npz", y0s=y0s, times=times, successes=successes, end_mode=end_mode)
-    # #
-    # # data = np.load(f"sim_results/{run_name}.npz")
-    # # print(data["times"], data["successes"],  hr_endmodes(data["end_mode"]))
+    y0s = get_y0s_xy_plane(0.0001, 0.0001, v0, num=5)
+    # y0s = get_y0s_sphere_skeleton(0.0001, 0.0001, 0.0001, v0, num=1000)
+    visualize_y0s(y0s, t_prop=1e-7)
+    Bz_tot = get_Bz_tot_func(d, a, Bmax, L, RT, BT)
+    Brho_tot = get_Brho_tot_func(d, a, Bmax, L, RT, BT)
+    Ez, Erho = get_simion_field_funcs(U0=U0)
+    gibalna_en = get_gibalna_en(Bz_tot, Brho_tot, Ez, Erho)
+    stopping_conds, hr_endmodes = get_stopping_conditions(Zf, Rt, Rs, Zb, Tf, Rl, Zlz, Zlk)
+    times, successes, end_mode = run_sim(y0s, gibalna_en, stopping_conds, Tf, draw_trajectories=True, Rs=Rs)
+    # np.savez(f"sim_results/{run_name}.npz", y0s=y0s, times=times, successes=successes, end_mode=end_mode)
+    #
+    # data = np.load(f"sim_results/{run_name}.npz")
+    # print(data["times"], data["successes"],  hr_endmodes(data["end_mode"]))
 

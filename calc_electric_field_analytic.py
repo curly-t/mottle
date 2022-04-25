@@ -1,9 +1,11 @@
+import os.path
+
 import numpy as np
 from scipy.optimize import root
 from scipy.special import factorial
 from fdm import central_fdm
 import matplotlib.pyplot as plt
-from scipy.interpolate import RectBivariateSpline
+from scipy.interpolate import RegularGridInterpolator    # Veliko bolj primeren ker gre čez vse točke polja točno
 
 
 def get_E_on_axis_func(Rr):
@@ -17,7 +19,6 @@ def get_E_on_axis_func(Rr):
             return Ear_at_border * 255/(zr**2)
 
         # DOBI Ur in Vr
-        @cache
         def get_nonlin_UrVr_eqs(R_rel, z_rel):
             # UrVr = np.array([Ur, Vr])
             def UrVr_eqs(UrVr):
@@ -121,7 +122,6 @@ def reposition_simion_data(data, z_offset, points_per_mm):
     positioned_data = np.concatenate((mirrored, data))
     xsize, ysize = int(np.max(positioned_data[:, 0]) + 1), int(np.max(positioned_data[:, 1]) * 2 + 1)
 
-    # positioned_data = np.copy(data)
     positioned_data[:, 0] = positioned_data[:, 0] * 0.001 / points_per_mm + z_offset
     positioned_data[:, 1] = positioned_data[:, 1] * 0.001 / points_per_mm
     return positioned_data, xsize, ysize
@@ -130,35 +130,24 @@ def reposition_simion_data(data, z_offset, points_per_mm):
 def get_field_funcs_simion(data, U0, xsize, ysize):
     # U0 je v voltih
     spl_rho, spl_z = data[::xsize, 1], data[:xsize, 0]
-    spline_rep = RectBivariateSpline(spl_rho, spl_z, data[:, 4].reshape(ysize, xsize))     # Ker hočemo (rho, z) koordinate
-    Erho = -spline_rep(spl_rho, spl_z, dx=1)        # E = -grad(U)
-    Ez = -spline_rep(spl_rho, spl_z, dy=1)          # E = -grad(U)
+    points = np.array([data[:, 1], data[:, 0]]).T
+    interpolator = RegularGridInterpolator((spl_rho, spl_z), data[:, 4].reshape(ysize, xsize))
+    potential = - interpolator(points).reshape(ysize, xsize)        # E = -grad(U)
+    Erho, Ez = np.gradient(potential, 0.00005, edge_order=2)   # TODO - vrednost 0.00005 velja le za saling 20 pix na mm
 
-    Erho_splrep = RectBivariateSpline(spl_rho, spl_z, Erho * U0)
-    Ez_splrep = RectBivariateSpline(spl_rho, spl_z, Ez * U0)
+    Erho_interp = RegularGridInterpolator((spl_rho, spl_z), Erho, bounds_error=False, fill_value=0.)
+    Ez_interp = RegularGridInterpolator((spl_rho, spl_z), Ez, bounds_error=False, fill_value=0.)
 
-    fig, axes = plt.subplots(1, 3)
-
-    axes[0].plot(Ez_splrep(0., spl_z)[0])
-
-    axes[1].imshow(Ez_splrep(spl_rho, spl_z))
-
-    axes[2].imshow(Ez)
-    plt.show()
+    # fig, axes = plt.subplots(1, 2)
+    # axes[0].plot(Ez_interp(np.array([np.zeros_like(spl_z), spl_z]).T))
+    # axes[1].imshow(Ez_interp(points).reshape(ysize, xsize))
+    # plt.show()
 
     def Erho_simion(rho, z):
-        z = np.abs(z)
-        rho = np.abs(rho)
-        if (rho > spl_rho[-1]) or (z > spl_z[-1]):
-            return 0.
-        return Erho_splrep(rho, z)[0][0]
+        return Erho_interp((np.abs(rho), z)) * np.sign(rho) * U0
 
     def Ez_simion(rho, z):
-        z = np.abs(z)
-        rho = np.abs(rho)
-        if (rho > spl_rho[-1]) or (z > spl_z[-1]):
-            return 0.
-        return Ez_splrep(rho, z)[0][0]
+        return Ez_interp((rho, z)) * U0
 
     return Erho_simion, Ez_simion
 
@@ -170,8 +159,17 @@ def get_simion_field_funcs(filepath="simion/chamber_20pix_per_mm.patxt", skiprow
     # V filu je zapis: x, y, z, is_electrode, potential
     # Funkcija vrne [[x, y, z, is_electrode, potential]_1, []_2, ...]
     # Simion ma x tam kjer mamo mi z in naša xy ravnina je njegova yz ravnina
-    data = load_simion_data(filepath, skiprows, max_rows)
-    pos_data, xsize, ysize = reposition_simion_data(data, z_offset, points_per_mm)
+    supposed_saved_file = filepath[:-5] + "npz"
+    if os.path.isfile(supposed_saved_file):
+        saved_data = np.load(supposed_saved_file)
+        pos_data = saved_data["data"]
+        sizes = saved_data["sizes"]
+        xsize, ysize = sizes[0], sizes[1]
+    else:
+        data = load_simion_data(filepath, skiprows, max_rows)
+        pos_data, xsize, ysize = reposition_simion_data(data, z_offset, points_per_mm)
+        np.savez(supposed_saved_file, data=pos_data, sizes=np.array([xsize, ysize]))
+
     return get_field_funcs_simion(pos_data, U0, xsize, ysize)
 
 
@@ -184,11 +182,12 @@ if __name__ == "__main__":
     R = 0.025/2
     h = 0.006
 
-    # Ez = get_Ez(R, h/2 + 0.001, 1/2)        # V Algoritmu je 2*U0 in 2*h med ploščama zato h/2 in U0/2
-    # Erho = get_Erho(R, h/2, 1/2)
-    #
-    # Erho_sim, Ez_sim = get_simion_field_funcs()
-    #
+    Ez = get_Ez(R, h/2 + 0.001, 1/2)    # V Algoritmu je 2*U0 in 2*h med ploščama zato h/2 in U0/2 kot argument vstavimo
+    Erho = get_Erho(R, h/2, 1/2)
+
+    Erho_sim, Ez_sim = get_simion_field_funcs()
+    print("Now calculating!")
+
     # # TEST 1
     # zs = np.linspace(-5*R, 5*R, num=200)  # Do sem še gre - nato razširi z eksponentno? al pa kr trdo odrežeš?
     # # zs = np.linspace(-100*R, 100*R, num=50000)  # Do sem še gre - nato razširi z eksponentno? al pa kr trdo odrežeš?
@@ -216,14 +215,18 @@ if __name__ == "__main__":
     # plt.legend()
     # plt.show()
 
+
     # # Test 3
     # rhos = np.linspace(-R, R, num=11)
     # zs = np.linspace(-5*R, 5*R, num=500)
-    # krivulje = np.zeros((11, 500))
+    # # krivulje = np.zeros((11, 500))
+    # krivulje1 = np.zeros((11, 500))
     # for i, rho in enumerate(rhos):
     #     for j, z in enumerate(zs):
-    #         krivulje[i, j] = Erho(rho, z)
-    #     plt.plot(zs, krivulje[i], color=(0, 1-i/(len(rhos)-1), i/(len(rhos)-1)))
+    #         # krivulje[i, j] = Erho(rho, z)
+    #         krivulje1[i, j] = Erho_sim(rho, z + 0.079)
+    #     # plt.plot(zs, krivulje[i], color=(0, 1-i/(len(rhos)-1), i/(len(rhos)-1)))
+    #     plt.plot(zs, krivulje1[i], color=(0, i/(len(rhos)-1), 1-i/(len(rhos)-1)))
     # plt.xlabel("z")
     # plt.title("Zeleno -> Modra ... rho = -R -> R")
     # plt.show()
@@ -234,7 +237,7 @@ if __name__ == "__main__":
     # krivulje = np.zeros((10, 200))
     # for i, rho in enumerate(rhos):
     #     for j, z in enumerate(zs):
-    #         krivulje[i, j] = Ez(rho, z)
+    #         krivulje[i, j] = Ez_sim(rho, z + 0.079)
     #     plt.plot(zs, krivulje[i], color=(0, 1-i/(len(rhos)-1), i/(len(rhos)-1)))
     # plt.xlabel("zs")
     # plt.title("Zelena -> Modra ... Rho = -R -> R")
