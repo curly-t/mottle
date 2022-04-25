@@ -252,8 +252,8 @@ if __name__ == "__main__":
 
     # MAGNETIC FIELD ONLY
     # run_name = str(input("Name this simulation run: "))
-    # y0s = get_y0s_omni(0.0001, 0.0, 0.001, v0, num=10)
-    y0s = get_y0s_xy_plane(0.0001, 0.0001, v0, num=5)
+    y0s = get_y0s_omni(0.0001, 0.0, 0.001, v0, num=100)
+    # y0s = get_y0s_xy_plane(0.0001, 0.0001, v0, num=5)
     # y0s = get_y0s_sphere_skeleton(0.0001, 0.0001, 0.0001, v0, num=1000)
     visualize_y0s(y0s, t_prop=1e-7)
     Bz_tot = get_Bz_tot_func(d, a, Bmax, L, RT, BT)
@@ -262,11 +262,17 @@ if __name__ == "__main__":
     external_params = {"d": d, "a": a, "Bmax": Bmax, "L": L, "RT": RT, "BT": BT}
     interp_params = {"bbox": ((0.0001, Zb*1.1), (Rt, Zf)), "initial_depth": 4,
                      "num_of_far_bound_points": 2000, "final_ref_tol": 1e-4, "num_test_points": 50000,
-                     "ref_tol": 0.05, "max_ref_depth": 14}
+                     "ref_tol": 0.05, "max_ref_depth": 13}
     Bzi = get_interpolated_func(Bz_tot, interp_params, external_params)
     Brhoi = get_interpolated_func(Brho_tot, interp_params, external_params)
     stopping_conds, hr_endmodes = get_stopping_conditions(Zf, Rt, Rs, Zb, Tf)
-    times, successes, end_mode = run_sim(y0s, Bzi, Brhoi, stopping_conds, Tf, draw_trajectories=True, Rs=Rs)
+    gibalna_en = get_gibalna_en(Bzi, Brhoi)
+    # gibalna_en = get_gibalna_en(Bz_tot, Brho_tot)
+    from time import perf_counter
+    print("Running sim!")
+    t0 = perf_counter()
+    times, successes, end_mode = run_sim(y0s, gibalna_en, stopping_conds, Tf, draw_trajectories=False, Rs=Rs, num_processes=12)
+    print("Final time =", perf_counter() - t0)
     # np.savez(f"sim_results/{run_name}.npz", y0s=y0s, times=times, successes=successes, end_mode=end_mode)
     #
     # data = np.load(f"sim_results/{run_name}.npz")
@@ -291,21 +297,21 @@ if __name__ == "__main__":
     # plt.show()
 
 
-    # ELECTRIF FILED ALSO
-    # run_name = str(input("Name this simulation run: "))
-    # y0s = get_y0s_omni(0.0001, 0.0, 0.001, v0, num=10)
-    y0s = get_y0s_xy_plane(0.0001, 0.0001, v0, num=5)
-    # y0s = get_y0s_sphere_skeleton(0.0001, 0.0001, 0.0001, v0, num=1000)
-    visualize_y0s(y0s, t_prop=1e-7)
-    Bz_tot = get_Bz_tot_func(d, a, Bmax, L, RT, BT)
-    Brho_tot = get_Brho_tot_func(d, a, Bmax, L, RT, BT)
-    Ez = get_Ez(Rl, hl, U0, dl=dl)
-    Erho = get_Erho(Rl, hl, U0, dl=dl)
-    gibalna_en = get_gibalna_en(Bz_tot, Brho_tot, Ez, Erho)
-    stopping_conds, hr_endmodes = get_stopping_conditions(Zf, Rt, Rs, Zb, Tf)
-    times, successes, end_mode = run_sim(y0s, gibalna_en, stopping_conds, Tf, draw_trajectories=True, Rs=Rs)
-    # np.savez(f"sim_results/{run_name}.npz", y0s=y0s, times=times, successes=successes, end_mode=end_mode)
-    #
-    # data = np.load(f"sim_results/{run_name}.npz")
-    # print(data["times"], data["successes"],  hr_endmodes(data["end_mode"]))
+    # # ELECTRIF FILED ALSO
+    # # run_name = str(input("Name this simulation run: "))
+    # # y0s = get_y0s_omni(0.0001, 0.0, 0.001, v0, num=10)
+    # y0s = get_y0s_xy_plane(0.0001, 0.0001, v0, num=5)
+    # # y0s = get_y0s_sphere_skeleton(0.0001, 0.0001, 0.0001, v0, num=1000)
+    # visualize_y0s(y0s, t_prop=1e-7)
+    # Bz_tot = get_Bz_tot_func(d, a, Bmax, L, RT, BT)
+    # Brho_tot = get_Brho_tot_func(d, a, Bmax, L, RT, BT)
+    # Ez = get_Ez(Rl, hl, U0, dl=dl)
+    # Erho = get_Erho(Rl, hl, U0, dl=dl)
+    # gibalna_en = get_gibalna_en(Bz_tot, Brho_tot, Ez, Erho)
+    # stopping_conds, hr_endmodes = get_stopping_conditions(Zf, Rt, Rs, Zb, Tf)
+    # times, successes, end_mode = run_sim(y0s, gibalna_en, stopping_conds, Tf, draw_trajectories=True, Rs=Rs)
+    # # np.savez(f"sim_results/{run_name}.npz", y0s=y0s, times=times, successes=successes, end_mode=end_mode)
+    # #
+    # # data = np.load(f"sim_results/{run_name}.npz")
+    # # print(data["times"], data["successes"],  hr_endmodes(data["end_mode"]))
 

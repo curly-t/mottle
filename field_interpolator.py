@@ -5,7 +5,6 @@ from ndtamr.Data import GenericData
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.interpolate import CloughTocher2DInterpolator
-from glob import glob
 import pickle
 from ast import literal_eval        # Parse tuples
 from os import path
@@ -19,7 +18,7 @@ def define_func_class(field_func):
         """
         data_cols = ['value']
 
-        def __init__(self, coords=(0, 0), file=None, data=None):
+        def __init__(self, coords=(0.001, 0.001), file=None, data=None):
             GenericData.__init__(self, coords=coords, file=file, data=data)
 
         def func(self):
@@ -40,7 +39,6 @@ def calc_far_bound_points(field_func, bbox, num_bound_points):
     """ This function is needed because the tree includes the low bound, but excludes the high bound,
     making the points near the high bound possibly undefined! """
 
-    print(bbox, num_bound_points)
     # Ena stranica končnih točk
     rhos1 = np.ones(num_bound_points//2 - 1) * bbox[1][0]
     zs1 = np.linspace(bbox[0][1], bbox[1][1], num=num_bound_points//2 - 1, endpoint=False)
@@ -121,9 +119,11 @@ def refine_tree(tree, field_func, bbox, far_bound_points, ref_tol=0.1, ref_exten
         interp_func = construct_interpolation(full_coords, full_vals)
         stat_vals, deviations = test_interpolation(interp_func, field_func, bbox, num_test_points)
 
-        vis.plot(tree, grid=True, cmap="Greys", aspect="auto", colorbar=False)
-        plt.scatter(deviations[0][0], deviations[0][1], alpha=0.05 + 0.95*np.abs(deviations[1])/np.max(np.abs(deviations[1])), marker=".")
-        plt.show()
+        # PLOTTING MUTTED FOR NOW!
+        # vis.plot(tree, grid=True, cmap="Greys", aspect="auto", colorbar=False)
+        # plt.show()
+        # plt.scatter(deviations[0][0], deviations[0][1], alpha=0.05 + 0.95*np.abs(deviations[1])/np.max(np.abs(deviations[1])), marker=".")
+        # plt.show()
 
         if stat_vals[0] < final_ref_tol:
             # Asks to break when the refinement tolerance is reached
@@ -149,12 +149,12 @@ def construct_save_name(func_num, interp_params, external_params):
     extrn_param_str = "_".join(
         [f"{str(key).replace('_', ':')}={str(type(val))[8]}{str(val).replace('.', ':')}" for (key, val) in
          external_params.items()])
-    return "__".join([name_str, interp_param_str, extrn_param_str]) + ".interp_func"
+    parameter_string = "__".join([name_str, interp_param_str, extrn_param_str])
+    return str(abs(hash(parameter_string))) + ".interp_func", parameter_string
 
 
-def parse_save_name(filename):
-    stripped = filename[:-12]
-    name, interp_param_str, extern_param_str = tuple(stripped.split("__"))
+def parse_save_name(filename, hash_fname):
+    name, interp_param_str, extern_param_str = tuple(filename.split("__"))
     interp_param_strings = interp_param_str.split("_")
     extern_param_strings = extern_param_str.split("_")
 
@@ -179,16 +179,20 @@ def parse_save_name(filename):
             params_dict.update({key: val})
         return params_dict
 
-    return {"filename": filename, "name": name,
+    return {"hash_fname": hash_fname, "filename": filename, "name": name,
             "interp_params": parse_param_strings(interp_param_strings),
             "external_params": parse_param_strings(extern_param_strings)}
 
 
 def parse_all_saved_interps_names():
-    filenames = [path.split(fname)[1] for fname in list(glob(path.join("interpolated_fields", "*.interp_func")))]
+    with open(path.join("interpolated_fields", "properties.txt"), "r") as f:
+        lines = f.readlines()
+        hash_fnames = [line.strip().split(" ")[0] for line in lines]
+        fnames = [line.strip()[len(hash_fnames[i]) + 1:] for i, line in enumerate(lines)]
+
     properties = []
-    for filename in filenames:
-        properties.append(parse_save_name(filename))
+    for fname, hash in zip(fnames, hash_fnames):
+        properties.append(parse_save_name(fname, hash))
     return properties
 
 
@@ -196,7 +200,7 @@ def search_saved_interps_for_match(func, interp_params, external_params, all_sav
     for saved_interpolator in all_saved_interpolators:
         if func.__name__ == saved_interpolator["name"]:
             if interp_params == saved_interpolator["interp_params"] and external_params == saved_interpolator["external_params"]:
-                return saved_interpolator["filename"]
+                return saved_interpolator["hash_fname"]
 
 
 def load_saved_interpolator(filename):
@@ -206,10 +210,12 @@ def load_saved_interpolator(filename):
 
 
 def save_interpolator(interpolator, func_name, interp_params, external_params):
-    filename = construct_save_name(func_name, interp_params, external_params)
+    filename, parameter_string = construct_save_name(func_name, interp_params, external_params)
     with open(path.join("interpolated_fields", filename), "wb") as f:
         print("Dumping!")
         pickle.dump(interpolator, f)
+    with open(path.join("interpolated_fields", "properties.txt"), "a") as f:
+        print(f"{filename} {parameter_string}", file=f)
 
 
 def get_interpolated_func(func, interp_params, external_params={}):
